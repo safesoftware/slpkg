@@ -1,7 +1,11 @@
+extern crate failure;
 extern crate structopt;
+extern crate zip;
 
 use std::path::PathBuf;
 use structopt::StructOpt;
+
+mod unpack;
 
 #[derive(Debug, StructOpt)]
 enum Settings {
@@ -24,5 +28,11 @@ enum Settings {
 
 fn main() {
     let params = Settings::from_args();
-    println!("{:?}", params);
+    match params {
+        Settings::Unpack { src_file: slpk } => {
+            if let Err(e) = unpack::unpack(slpk) {
+                eprintln!("{}", e);
+            }
+        }
+    }
 }
