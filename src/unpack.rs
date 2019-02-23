@@ -21,7 +21,7 @@ fn open_slpk_archive(slpk_file_path: PathBuf) -> Result<ZipArchive<impl Read + S
     return Ok(ZipArchive::new(buf_reader)?);
 }
 
-fn get_unpack_folder(mut slpk_file_path: PathBuf, quiet: bool) -> Result<PathBuf, Error> {
+fn get_unpack_folder(mut slpk_file_path: PathBuf, verbose: bool) -> Result<PathBuf, Error> {
 
     // Try to extract the file stem. This name will be used as the folder name which
     // the package will be unpacked into. If the package has no file_stem, then
@@ -42,12 +42,12 @@ fn get_unpack_folder(mut slpk_file_path: PathBuf, quiet: bool) -> Result<PathBuf
 
     if slpk_file_path.exists() {
         if slpk_file_path.is_dir() {
-            if !quiet {
+            if verbose {
                 println!("Deleting folder: {}", slpk_file_path.to_string_lossy());
             }
             std::fs::remove_dir_all(slpk_file_path.clone())?;
         } else if slpk_file_path.is_file() {
-            if !quiet {
+            if verbose {
                 println!("Deleting file: {}", slpk_file_path.to_string_lossy());
             }
             std::fs::remove_file(slpk_file_path.clone())?;
@@ -75,7 +75,7 @@ fn create_folder_for_entry(
 fn unpack_entry(
     mut archive_entry: ZipFile,
     unpack_folder: PathBuf,
-    quiet: bool,
+    verbose: bool,
 ) -> Result<(), Error> {
     let archive_entry_path = archive_entry.sanitized_name();
     let target_folder = create_folder_for_entry(unpack_folder, &archive_entry_path)?;
@@ -85,7 +85,7 @@ fn unpack_entry(
             let mut target_file_path = target_folder;
             target_file_path.push(non_gzip_name);
 
-            if !quiet {
+            if verbose {
                 println!(
                     "Decompress: {} -> {}",
                     archive_entry.name(),
@@ -102,7 +102,7 @@ fn unpack_entry(
             let mut target_file_path = target_folder;
             target_file_path.push(name);
 
-            if !quiet {
+            if verbose {
                 println!(
                     "Copy: {} -> {}",
                     archive_entry.name(),
@@ -118,8 +118,8 @@ fn unpack_entry(
     Ok(())
 }
 
-pub fn unpack(slpk_file_path: PathBuf, quiet: bool) -> Result<(), Error> {
-    let unpack_folder = get_unpack_folder(slpk_file_path.clone(), quiet)?;
+pub fn unpack(slpk_file_path: PathBuf, verbose: bool) -> Result<(), Error> {
+    let unpack_folder = get_unpack_folder(slpk_file_path.clone(), verbose)?;
 
     // We'll create one thread per CPU core.
     let num_threads = num_cpus::get();
@@ -137,7 +137,7 @@ pub fn unpack(slpk_file_path: PathBuf, quiet: bool) -> Result<(), Error> {
 
             for entry_idx in start_entry..end_entry {
                 let archive_entry = slpk_archive.by_index(entry_idx)?;
-                unpack_entry(archive_entry, unpack_folder.clone(), quiet)?;
+                unpack_entry(archive_entry, unpack_folder.clone(), verbose)?;
             }
 
             Ok(())

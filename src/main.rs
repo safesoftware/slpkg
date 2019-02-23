@@ -24,16 +24,16 @@ enum Settings {
         #[structopt(parse(from_os_str))]
         src_file: PathBuf,
 
-        #[structopt(short = "q", long = "quiet")]
-        quiet: bool,
+        #[structopt(short = "v", long = "verbose")]
+        verbose: bool,
     },
 }
 
 fn main() {
     let params = Settings::from_args();
     match params {
-        Settings::Unpack { src_file, quiet } => {
-            if let Err(e) = unpack::unpack(src_file, quiet) {
+        Settings::Unpack { src_file, verbose } => {
+            if let Err(e) = unpack::unpack(src_file, verbose) {
                 eprintln!("{}", e);
             }
         }
