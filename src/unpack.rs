@@ -15,7 +15,7 @@ fn open_slpk_archive(slpk_file_path: PathBuf) -> Result<ZipArchive<impl Read + S
     return Ok(ZipArchive::new(buf_reader)?);
 }
 
-fn get_unpack_folder(mut slpk_file_path: PathBuf) -> Result<PathBuf, Error> {
+fn get_unpack_folder(mut slpk_file_path: PathBuf, quiet: bool) -> Result<PathBuf, Error> {
     // Essentially this just trims the extension from the file path. There
     // has got to be a way to do this without a memory allocation.
     // TODO: Remove this unwrap, map the Option to an Result
@@ -32,10 +32,14 @@ fn get_unpack_folder(mut slpk_file_path: PathBuf) -> Result<PathBuf, Error> {
 
     if slpk_file_path.exists() {
         if slpk_file_path.is_dir() {
-            println!("Deleting folder: {}", slpk_file_path.to_string_lossy());
+            if !quiet {
+                println!("Deleting folder: {}", slpk_file_path.to_string_lossy());
+            }
             std::fs::remove_dir_all(slpk_file_path.clone())?;
         } else if slpk_file_path.is_file() {
-            println!("Deleting file: {}", slpk_file_path.to_string_lossy());
+            if !quiet {
+                println!("Deleting file: {}", slpk_file_path.to_string_lossy());
+            }
             std::fs::remove_file(slpk_file_path.clone())?;
         }
     }
@@ -58,7 +62,11 @@ fn create_folder_for_entry(
     Ok(target_directory)
 }
 
-fn unpack_entry(mut archive_entry: ZipFile, unpack_folder: PathBuf) -> Result<(), Error> {
+fn unpack_entry(
+    mut archive_entry: ZipFile,
+    unpack_folder: PathBuf,
+    quiet: bool,
+) -> Result<(), Error> {
     let archive_entry_path = archive_entry.sanitized_name();
     let target_folder = create_folder_for_entry(unpack_folder, &archive_entry_path)?;
 
@@ -66,24 +74,29 @@ fn unpack_entry(mut archive_entry: ZipFile, unpack_folder: PathBuf) -> Result<()
         let mut target_file_path = target_folder;
         target_file_path.push(archive_entry_path.file_stem().unwrap());
 
-        println!(
-            "Decompress: {} -> {}",
-            archive_entry.name(),
-            target_file_path.to_str().unwrap()
-        );
-        let mut gz_reader = GzDecoder::new(archive_entry);
+        if !quiet {
+            println!(
+                "Decompress: {} -> {}",
+                archive_entry.name(),
+                target_file_path.to_str().unwrap()
+            );
+        }
 
+        let mut gz_reader = GzDecoder::new(archive_entry);
         let mut target_file = File::create(target_file_path)?;
         std::io::copy(&mut gz_reader, &mut target_file)?;
     } else {
         let mut target_file_path = target_folder;
         target_file_path.push(archive_entry_path.file_name().unwrap());
 
-        println!(
-            "Copy: {} -> {}",
-            archive_entry.name(),
-            target_file_path.to_str().unwrap()
-        );
+        if !quiet {
+            println!(
+                "Copy: {} -> {}",
+                archive_entry.name(),
+                target_file_path.to_str().unwrap()
+            );
+        }
+
         let mut target_file = File::create(target_file_path)?;
         std::io::copy(&mut archive_entry, &mut target_file)?;
     }
@@ -91,8 +104,8 @@ fn unpack_entry(mut archive_entry: ZipFile, unpack_folder: PathBuf) -> Result<()
     Ok(())
 }
 
-pub fn unpack(slpk_file_path: PathBuf) -> Result<(), Error> {
-    let unpack_folder = get_unpack_folder(slpk_file_path.clone())?;
+pub fn unpack(slpk_file_path: PathBuf, quiet: bool) -> Result<(), Error> {
+    let unpack_folder = get_unpack_folder(slpk_file_path.clone(), quiet)?;
 
     // We'll create one thread per CPU core.
     let num_threads = num_cpus::get();
@@ -101,18 +114,16 @@ pub fn unpack(slpk_file_path: PathBuf) -> Result<(), Error> {
     for i in 0..num_threads {
         let slpk_file_path = slpk_file_path.clone();
         let unpack_folder = unpack_folder.clone();
-        threads.push(thread::spawn( move || {
-            println!("Starting thread {}", i);
+        threads.push(thread::spawn(move || {
             let mut slpk_archive = open_slpk_archive(slpk_file_path.clone()).unwrap();
 
             let entries_per_thread = slpk_archive.len() / num_threads;
             let start_entry = entries_per_thread * i;
-            let end_entry = std::cmp::min( entries_per_thread * (i+1), slpk_archive.len() );
+            let end_entry = std::cmp::min(entries_per_thread * (i + 1), slpk_archive.len());
 
-            println!("Thread {} is reading entries in range {}..{}", i, start_entry, end_entry);
             for entry_idx in start_entry..end_entry {
                 let archive_entry = slpk_archive.by_index(entry_idx).unwrap();
-                unpack_entry(archive_entry, unpack_folder.clone()).unwrap();
+                unpack_entry(archive_entry, unpack_folder.clone(), quiet).unwrap();
             }
         }));
     }

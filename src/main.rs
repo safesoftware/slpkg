@@ -23,14 +23,17 @@ enum Settings {
         /// The .slpk file which will be unpacked
         #[structopt(parse(from_os_str))]
         src_file: PathBuf,
+
+        #[structopt(short = "q", long = "quiet")]
+        quiet: bool,
     },
 }
 
 fn main() {
     let params = Settings::from_args();
     match params {
-        Settings::Unpack { src_file: slpk } => {
-            if let Err(e) = unpack::unpack(slpk) {
+        Settings::Unpack { src_file, quiet } => {
+            if let Err(e) = unpack::unpack(src_file, quiet) {
                 eprintln!("{}", e);
             }
         }
