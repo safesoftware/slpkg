@@ -1,5 +1,6 @@
 use failure::Error;
 
+use flate2::read::GzDecoder;
 use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
@@ -13,7 +14,7 @@ fn open_slpk_archive(slpk_file_path: PathBuf) -> Result<ZipArchive<impl Read + S
     return Ok(ZipArchive::new(buf_reader)?);
 }
 
-fn get_target_directory(mut slpk_file_path: PathBuf) -> Result<PathBuf, Error> {
+fn get_unpack_folder(mut slpk_file_path: PathBuf) -> Result<PathBuf, Error> {
     // Essentially this just trims the extension from the file path. There
     // has got to be a way to do this without a memory allocation.
     // TODO: Remove this unwrap, map the Option to an Result
@@ -30,8 +31,10 @@ fn get_target_directory(mut slpk_file_path: PathBuf) -> Result<PathBuf, Error> {
 
     if slpk_file_path.exists() {
         if slpk_file_path.is_dir() {
+            println!("Deleting folder: {}", slpk_file_path.to_string_lossy());
             std::fs::remove_dir_all(slpk_file_path.clone())?;
         } else if slpk_file_path.is_file() {
+            println!("Deleting file: {}", slpk_file_path.to_string_lossy());
             std::fs::remove_file(slpk_file_path.clone())?;
         }
     }
@@ -40,17 +43,54 @@ fn get_target_directory(mut slpk_file_path: PathBuf) -> Result<PathBuf, Error> {
     Ok(slpk_file_path)
 }
 
+fn create_folder_for_entry(
+    mut target_directory: PathBuf,
+    zip_entry: &PathBuf,
+) -> Result<PathBuf, Error> {
+    // TODO: if the zip_entry is an absolute path, this will end up creating an absolute path on
+    // the target machine. This shouldn't happen, as all files should be extracted into the
+    // target folder.
+    if let Some(parent_path) = zip_entry.parent() {
+        target_directory.push(parent_path);
+        std::fs::create_dir_all(target_directory.clone())?;
+    }
+    Ok(target_directory)
+}
+
 pub fn unpack(slpk_file_path: PathBuf) -> Result<(), Error> {
     let mut slpk_archive = open_slpk_archive(slpk_file_path.clone())?;
-
-    let target_directory = get_target_directory(slpk_file_path)?;
-    if target_directory.exists() {}
+    let unpack_folder = get_unpack_folder(slpk_file_path)?;
 
     for i in 0..slpk_archive.len() {
-        let file = slpk_archive.by_index(i)?;
-        let mut target_file = target_directory.clone();
-        target_file.push(file.sanitized_name());
-        println!("{} -> {:?}", file.name(), target_file);
+        let mut archive_entry = slpk_archive.by_index(i)?;
+        let archive_entry_path = archive_entry.sanitized_name();
+        let target_folder = create_folder_for_entry(unpack_folder.clone(), &archive_entry_path)?;
+
+        if let Some("gz") = archive_entry_path.extension().and_then(|x| x.to_str() ) {
+            let mut target_file_path = target_folder;
+            target_file_path.push(archive_entry_path.file_stem().unwrap());
+
+            println!(
+                "Decompress: {} -> {}",
+                archive_entry.name(),
+                target_file_path.to_str().unwrap()
+            );
+            let mut gz_reader = GzDecoder::new(archive_entry);
+
+            let mut target_file = File::create(target_file_path)?;
+            std::io::copy(&mut gz_reader, &mut target_file)?;
+        } else {
+            let mut target_file_path = target_folder;
+            target_file_path.push(archive_entry_path.file_name().unwrap());
+
+            println!(
+                "Copy: {} -> {}",
+                archive_entry.name(),
+                target_file_path.to_str().unwrap()
+            );
+            let mut target_file = File::create(target_file_path)?;
+            std::io::copy(&mut archive_entry, &mut target_file)?;
+        }
     }
 
     Ok(())
