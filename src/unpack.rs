@@ -9,6 +9,12 @@ use std::thread;
 use zip::read::ZipFile;
 use zip::ZipArchive;
 
+#[derive(Debug,Fail)]
+enum UnpackError {
+    #[fail(display="Unable to create a folder for unpacking the package")]
+    NoFolderForPackage
+}
+
 fn open_slpk_archive(slpk_file_path: PathBuf) -> Result<ZipArchive<impl Read + Seek>, Error> {
     let file = File::open(slpk_file_path)?;
     let buf_reader = BufReader::new(file);
@@ -16,16 +22,20 @@ fn open_slpk_archive(slpk_file_path: PathBuf) -> Result<ZipArchive<impl Read + S
 }
 
 fn get_unpack_folder(mut slpk_file_path: PathBuf, quiet: bool) -> Result<PathBuf, Error> {
-    // Essentially this just trims the extension from the file path. There
-    // has got to be a way to do this without a memory allocation.
-    // TODO: Remove this unwrap, map the Option to an Result
-    let file_stem = slpk_file_path.file_stem().unwrap().to_os_string();
-    slpk_file_path.set_file_name(file_stem);
 
-    // TODO: Handle the case where the slpk file has no extension, and
-    // thus the file stem is the same as the filename. In this case we
-    // could either error out, or append a suffix (_unpacked maybe?) to
-    // the filename.
+    // Try to extract the file stem. This name will be used as the folder name which
+    // the package will be unpacked into. If the package has no file_stem, then
+    // it cannot be unpacked. We could come up with some other name to use, but
+    // this is a fairly unlikely scenario, so just quitting is ok.
+    let file_stem = slpk_file_path.file_stem();
+    match file_stem {
+        Some(name) => {
+            slpk_file_path.set_file_name(name.to_os_string());
+        },
+        None => {
+            return Err(Error::from(UnpackError::NoFolderForPackage));
+        }
+    }
 
     // TODO: Probably the behaviour with respect to existing directories
     // should be configurable.
@@ -71,34 +81,38 @@ fn unpack_entry(
     let target_folder = create_folder_for_entry(unpack_folder, &archive_entry_path)?;
 
     if let Some("gz") = archive_entry_path.extension().and_then(|x| x.to_str()) {
-        let mut target_file_path = target_folder;
-        target_file_path.push(archive_entry_path.file_stem().unwrap());
+        if let Some(non_gzip_name) = archive_entry_path.file_stem() {
+            let mut target_file_path = target_folder;
+            target_file_path.push(non_gzip_name);
 
-        if !quiet {
-            println!(
-                "Decompress: {} -> {}",
-                archive_entry.name(),
-                target_file_path.to_str().unwrap()
-            );
+            if !quiet {
+                println!(
+                    "Decompress: {} -> {}",
+                    archive_entry.name(),
+                    target_file_path.to_string_lossy()
+                );
+            }
+
+            let mut gz_reader = GzDecoder::new(archive_entry);
+            let mut target_file = File::create(target_file_path)?;
+            std::io::copy(&mut gz_reader, &mut target_file)?;
         }
-
-        let mut gz_reader = GzDecoder::new(archive_entry);
-        let mut target_file = File::create(target_file_path)?;
-        std::io::copy(&mut gz_reader, &mut target_file)?;
     } else {
-        let mut target_file_path = target_folder;
-        target_file_path.push(archive_entry_path.file_name().unwrap());
+        if let Some(name) = archive_entry_path.file_name() {
+            let mut target_file_path = target_folder;
+            target_file_path.push(name);
 
-        if !quiet {
-            println!(
-                "Copy: {} -> {}",
-                archive_entry.name(),
-                target_file_path.to_str().unwrap()
-            );
+            if !quiet {
+                println!(
+                    "Copy: {} -> {}",
+                    archive_entry.name(),
+                    target_file_path.to_string_lossy()
+                );
+            }
+
+            let mut target_file = File::create(target_file_path)?;
+            std::io::copy(&mut archive_entry, &mut target_file)?;
         }
-
-        let mut target_file = File::create(target_file_path)?;
-        std::io::copy(&mut archive_entry, &mut target_file)?;
     }
 
     Ok(())
@@ -114,23 +128,29 @@ pub fn unpack(slpk_file_path: PathBuf, quiet: bool) -> Result<(), Error> {
     for i in 0..num_threads {
         let slpk_file_path = slpk_file_path.clone();
         let unpack_folder = unpack_folder.clone();
-        threads.push(thread::spawn(move || {
-            let mut slpk_archive = open_slpk_archive(slpk_file_path.clone()).unwrap();
+        threads.push(thread::spawn(move || -> Result<(), Error> {
+            let mut slpk_archive = open_slpk_archive(slpk_file_path.clone())?;
 
             let entries_per_thread = slpk_archive.len() / num_threads;
             let start_entry = entries_per_thread * i;
             let end_entry = std::cmp::min(entries_per_thread * (i + 1), slpk_archive.len());
 
             for entry_idx in start_entry..end_entry {
-                let archive_entry = slpk_archive.by_index(entry_idx).unwrap();
-                unpack_entry(archive_entry, unpack_folder.clone(), quiet).unwrap();
+                let archive_entry = slpk_archive.by_index(entry_idx)?;
+                unpack_entry(archive_entry, unpack_folder.clone(), quiet)?;
             }
+
+            Ok(())
         }));
     }
 
     for t in threads {
-        // TODO: handle error values here
-        t.join();
+        if let Ok(Err(e)) = t.join() {
+            eprintln!("{}", e);
+
+            // TODO: Should this return, or wait for other threads to finish?
+            return Err(e);
+        }
     }
 
     Ok(())
