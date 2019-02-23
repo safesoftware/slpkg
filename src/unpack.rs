@@ -1,13 +1,13 @@
 use failure::Error;
-
 use flate2::read::GzDecoder;
 use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
 use std::io::Seek;
 use std::path::PathBuf;
-use zip::ZipArchive;
+use std::thread;
 use zip::read::ZipFile;
+use zip::ZipArchive;
 
 fn open_slpk_archive(slpk_file_path: PathBuf) -> Result<ZipArchive<impl Read + Seek>, Error> {
     let file = File::open(slpk_file_path)?;
@@ -92,12 +92,34 @@ fn unpack_entry(mut archive_entry: ZipFile, unpack_folder: PathBuf) -> Result<()
 }
 
 pub fn unpack(slpk_file_path: PathBuf) -> Result<(), Error> {
-    let mut slpk_archive = open_slpk_archive(slpk_file_path.clone())?;
-    let unpack_folder = get_unpack_folder(slpk_file_path)?;
+    let unpack_folder = get_unpack_folder(slpk_file_path.clone())?;
 
-    for i in 0..slpk_archive.len() {
-        let archive_entry = slpk_archive.by_index(i)?;
-        unpack_entry(archive_entry, unpack_folder.clone())?;
+    // We'll create one thread per CPU core.
+    let num_threads = num_cpus::get();
+
+    let mut threads = Vec::with_capacity(num_threads);
+    for i in 0..num_threads {
+        let slpk_file_path = slpk_file_path.clone();
+        let unpack_folder = unpack_folder.clone();
+        threads.push(thread::spawn( move || {
+            println!("Starting thread {}", i);
+            let mut slpk_archive = open_slpk_archive(slpk_file_path.clone()).unwrap();
+
+            let entries_per_thread = slpk_archive.len() / num_threads;
+            let start_entry = entries_per_thread * i;
+            let end_entry = std::cmp::min( entries_per_thread * (i+1), slpk_archive.len() );
+
+            println!("Thread {} is reading entries in range {}..{}", i, start_entry, end_entry);
+            for entry_idx in start_entry..end_entry {
+                let archive_entry = slpk_archive.by_index(entry_idx).unwrap();
+                unpack_entry(archive_entry, unpack_folder.clone()).unwrap();
+            }
+        }));
+    }
+
+    for t in threads {
+        // TODO: handle error values here
+        t.join();
     }
 
     Ok(())
