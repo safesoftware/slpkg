@@ -9,10 +9,10 @@ use std::thread;
 use zip::read::ZipFile;
 use zip::ZipArchive;
 
-#[derive(Debug,Fail)]
+#[derive(Debug, Fail)]
 enum UnpackError {
-    #[fail(display="Unable to create a folder for unpacking the package")]
-    NoFolderForPackage
+    #[fail(display = "Unable to create a folder for unpacking the package")]
+    NoFolderForPackage,
 }
 
 fn open_slpk_archive(slpk_file_path: PathBuf) -> Result<ZipArchive<impl Read + Seek>, Error> {
@@ -22,17 +22,23 @@ fn open_slpk_archive(slpk_file_path: PathBuf) -> Result<ZipArchive<impl Read + S
 }
 
 fn get_unpack_folder(mut slpk_file_path: PathBuf, verbose: bool) -> Result<PathBuf, Error> {
-
     // Try to extract the file stem. This name will be used as the folder name which
     // the package will be unpacked into. If the package has no file_stem, then
     // it cannot be unpacked. We could come up with some other name to use, but
     // this is a fairly unlikely scenario, so just quitting is ok.
-    let file_stem = slpk_file_path.file_stem();
-    match file_stem {
-        Some(name) => {
-            slpk_file_path.set_file_name(name.to_os_string());
-        },
+    match slpk_file_path.extension() {
+        Some(_) => {
+            if let Some(file_stem) = slpk_file_path.file_stem() {
+                slpk_file_path.set_file_name(file_stem.to_os_string());
+            } else {
+                // This probably shouldn't happen. Tough to have a file with an
+                // extension but no file stem.
+                return Err(Error::from(UnpackError::NoFolderForPackage));
+            }
+        }
         None => {
+            // The file has no extension. This means we cannot use the file basename
+            // as the unpacking folder.
             return Err(Error::from(UnpackError::NoFolderForPackage));
         }
     }
