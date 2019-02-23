@@ -7,6 +7,7 @@ use std::io::Read;
 use std::io::Seek;
 use std::path::PathBuf;
 use zip::ZipArchive;
+use zip::read::ZipFile;
 
 fn open_slpk_archive(slpk_file_path: PathBuf) -> Result<ZipArchive<impl Read + Seek>, Error> {
     let file = File::open(slpk_file_path)?;
@@ -57,40 +58,46 @@ fn create_folder_for_entry(
     Ok(target_directory)
 }
 
+fn unpack_entry(mut archive_entry: ZipFile, unpack_folder: PathBuf) -> Result<(), Error> {
+    let archive_entry_path = archive_entry.sanitized_name();
+    let target_folder = create_folder_for_entry(unpack_folder, &archive_entry_path)?;
+
+    if let Some("gz") = archive_entry_path.extension().and_then(|x| x.to_str()) {
+        let mut target_file_path = target_folder;
+        target_file_path.push(archive_entry_path.file_stem().unwrap());
+
+        println!(
+            "Decompress: {} -> {}",
+            archive_entry.name(),
+            target_file_path.to_str().unwrap()
+        );
+        let mut gz_reader = GzDecoder::new(archive_entry);
+
+        let mut target_file = File::create(target_file_path)?;
+        std::io::copy(&mut gz_reader, &mut target_file)?;
+    } else {
+        let mut target_file_path = target_folder;
+        target_file_path.push(archive_entry_path.file_name().unwrap());
+
+        println!(
+            "Copy: {} -> {}",
+            archive_entry.name(),
+            target_file_path.to_str().unwrap()
+        );
+        let mut target_file = File::create(target_file_path)?;
+        std::io::copy(&mut archive_entry, &mut target_file)?;
+    }
+
+    Ok(())
+}
+
 pub fn unpack(slpk_file_path: PathBuf) -> Result<(), Error> {
     let mut slpk_archive = open_slpk_archive(slpk_file_path.clone())?;
     let unpack_folder = get_unpack_folder(slpk_file_path)?;
 
     for i in 0..slpk_archive.len() {
-        let mut archive_entry = slpk_archive.by_index(i)?;
-        let archive_entry_path = archive_entry.sanitized_name();
-        let target_folder = create_folder_for_entry(unpack_folder.clone(), &archive_entry_path)?;
-
-        if let Some("gz") = archive_entry_path.extension().and_then(|x| x.to_str() ) {
-            let mut target_file_path = target_folder;
-            target_file_path.push(archive_entry_path.file_stem().unwrap());
-
-            println!(
-                "Decompress: {} -> {}",
-                archive_entry.name(),
-                target_file_path.to_str().unwrap()
-            );
-            let mut gz_reader = GzDecoder::new(archive_entry);
-
-            let mut target_file = File::create(target_file_path)?;
-            std::io::copy(&mut gz_reader, &mut target_file)?;
-        } else {
-            let mut target_file_path = target_folder;
-            target_file_path.push(archive_entry_path.file_name().unwrap());
-
-            println!(
-                "Copy: {} -> {}",
-                archive_entry.name(),
-                target_file_path.to_str().unwrap()
-            );
-            let mut target_file = File::create(target_file_path)?;
-            std::io::copy(&mut archive_entry, &mut target_file)?;
-        }
+        let archive_entry = slpk_archive.by_index(i)?;
+        unpack_entry(archive_entry, unpack_folder.clone())?;
     }
 
     Ok(())
