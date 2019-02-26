@@ -124,6 +124,28 @@ fn unpack_entry(
     Ok(())
 }
 
+fn calculate_entries_for_thread(
+    thread_id: usize,
+    num_threads: usize,
+    num_entries: usize,
+) -> Option<(usize, usize)> {
+    // In theory, we're going to divide the work between threads, so that each thread gets
+    // an equal number of entries. In practice however, the number of entries is not going
+    // to be divisible by the number of threads, so some threads have to do extra work.
+    let entries_per_thread = ((num_entries as f64) / (num_threads as f64)).ceil() as usize;
+
+    // Note that if the number of entries is small and the number of threads is fairly large,
+    // the calculations below could result in entry indices which are greater than num_entries.
+    let start_entry = entries_per_thread * thread_id;
+    let end_entry = entries_per_thread * (thread_id + 1);
+
+    if start_entry < num_entries {
+        return Some((start_entry, std::cmp::min(end_entry, num_entries)));
+    } else {
+        return None;
+    }
+}
+
 pub fn unpack(slpk_file_path: PathBuf, verbose: bool) -> Result<(), Error> {
     let unpack_folder = get_unpack_folder(slpk_file_path.clone(), verbose)?;
 
@@ -136,14 +158,15 @@ pub fn unpack(slpk_file_path: PathBuf, verbose: bool) -> Result<(), Error> {
         let unpack_folder = unpack_folder.clone();
         threads.push(thread::spawn(move || -> Result<(), Error> {
             let mut slpk_archive = open_slpk_archive(slpk_file_path.clone())?;
+            let num_entries = slpk_archive.len();
 
-            let entries_per_thread = slpk_archive.len() / num_threads;
-            let start_entry = entries_per_thread * i;
-            let end_entry = std::cmp::min(entries_per_thread * (i + 1), slpk_archive.len());
-
-            for entry_idx in start_entry..end_entry {
-                let archive_entry = slpk_archive.by_index(entry_idx)?;
-                unpack_entry(archive_entry, unpack_folder.clone(), verbose)?;
+            if let Some((start_entry, end_entry)) =
+                calculate_entries_for_thread(i, num_threads, num_entries)
+            {
+                for entry_idx in start_entry..end_entry {
+                    let archive_entry = slpk_archive.by_index(entry_idx)?;
+                    unpack_entry(archive_entry, unpack_folder.clone(), verbose)?;
+                }
             }
 
             Ok(())
