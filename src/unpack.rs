@@ -18,7 +18,7 @@ enum UnpackError {
 fn open_slpk_archive(slpk_file_path: PathBuf) -> Result<ZipArchive<impl Read + Seek>, Error> {
     let file = File::open(slpk_file_path)?;
     let buf_reader = BufReader::new(file);
-    return Ok(ZipArchive::new(buf_reader)?);
+    Ok(ZipArchive::new(buf_reader)?)
 }
 
 fn get_unpack_folder(mut slpk_file_path: PathBuf) -> Result<PathBuf, Error> {
@@ -82,7 +82,7 @@ fn unpack_entry(
     let archive_entry_path = archive_entry.sanitized_name();
     let target_folder = create_folder_for_entry(unpack_folder, &archive_entry_path)?;
 
-    if let Some("gz") = archive_entry_path.extension().and_then(|x| x.to_str()) {
+    if let Some("gz") = archive_entry_path.extension().and_then(std::ffi::OsStr::to_str) {
         if let Some(non_gzip_name) = archive_entry_path.file_stem() {
             let mut target_file_path = target_folder;
             target_file_path.push(non_gzip_name);
@@ -99,22 +99,20 @@ fn unpack_entry(
             let mut target_file = File::create(target_file_path)?;
             std::io::copy(&mut gz_reader, &mut target_file)?;
         }
-    } else {
-        if let Some(name) = archive_entry_path.file_name() {
-            let mut target_file_path = target_folder;
-            target_file_path.push(name);
+    } else if let Some(name) = archive_entry_path.file_name() {
+        let mut target_file_path = target_folder;
+        target_file_path.push(name);
 
-            if verbose {
-                println!(
-                    "Copy: {} -> {}",
-                    archive_entry.name(),
-                    target_file_path.to_string_lossy()
-                );
-            }
-
-            let mut target_file = File::create(target_file_path)?;
-            std::io::copy(&mut archive_entry, &mut target_file)?;
+        if verbose {
+            println!(
+                "Copy: {} -> {}",
+                archive_entry.name(),
+                target_file_path.to_string_lossy()
+            );
         }
+
+        let mut target_file = File::create(target_file_path)?;
+        std::io::copy(&mut archive_entry, &mut target_file)?;
     }
 
     Ok(())
@@ -136,13 +134,13 @@ fn calculate_entries_for_thread(
     let end_entry = entries_per_thread * (thread_id + 1);
 
     if start_entry < num_entries {
-        return Some((start_entry, std::cmp::min(end_entry, num_entries)));
+        Some((start_entry, std::cmp::min(end_entry, num_entries)))
     } else {
-        return None;
+        None
     }
 }
 
-pub fn unpack(slpk_file_path: PathBuf, verbose: bool) -> Result<(), Error> {
+pub fn unpack(slpk_file_path: &PathBuf, verbose: bool) -> Result<(), Error> {
     println!("Unpacking archive: {}", slpk_file_path.to_string_lossy());
 
     let unpack_folder = get_unpack_folder(slpk_file_path.clone())?;

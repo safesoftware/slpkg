@@ -34,7 +34,7 @@ fn main() {
     let params = Settings::from_args();
     match params {
         Settings::Unpack { src_file, verbose } => {
-            if let Err(e) = unpack::unpack(src_file, verbose) {
+            if let Err(e) = unpack::unpack(&src_file, verbose) {
                 eprintln!("{}", e);
             }
         }
