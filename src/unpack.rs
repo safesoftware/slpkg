@@ -21,7 +21,7 @@ fn open_slpk_archive(slpk_file_path: PathBuf) -> Result<ZipArchive<impl Read + S
     return Ok(ZipArchive::new(buf_reader)?);
 }
 
-fn get_unpack_folder(mut slpk_file_path: PathBuf, verbose: bool) -> Result<PathBuf, Error> {
+fn get_unpack_folder(mut slpk_file_path: PathBuf) -> Result<PathBuf, Error> {
     // Try to extract the file stem. This name will be used as the folder name which
     // the package will be unpacked into. If the package has no file_stem, then
     // it cannot be unpacked. We could come up with some other name to use, but
@@ -48,14 +48,10 @@ fn get_unpack_folder(mut slpk_file_path: PathBuf, verbose: bool) -> Result<PathB
 
     if slpk_file_path.exists() {
         if slpk_file_path.is_dir() {
-            if verbose {
-                println!("Deleting folder: {}", slpk_file_path.to_string_lossy());
-            }
+            println!("Deleting folder: {}", slpk_file_path.to_string_lossy());
             std::fs::remove_dir_all(slpk_file_path.clone())?;
         } else if slpk_file_path.is_file() {
-            if verbose {
-                println!("Deleting file: {}", slpk_file_path.to_string_lossy());
-            }
+            println!("Deleting file: {}", slpk_file_path.to_string_lossy());
             std::fs::remove_file(slpk_file_path.clone())?;
         }
     }
@@ -147,7 +143,9 @@ fn calculate_entries_for_thread(
 }
 
 pub fn unpack(slpk_file_path: PathBuf, verbose: bool) -> Result<(), Error> {
-    let unpack_folder = get_unpack_folder(slpk_file_path.clone(), verbose)?;
+    println!("Unpacking archive: {}", slpk_file_path.to_string_lossy());
+
+    let unpack_folder = get_unpack_folder(slpk_file_path.clone())?;
 
     // We'll create one thread per CPU core.
     let num_threads = num_cpus::get();
@@ -194,9 +192,7 @@ pub fn unpack(slpk_file_path: PathBuf, verbose: bool) -> Result<(), Error> {
         }
     }
 
-    if verbose {
-        println!("{} files unpacked", total_entries_unpacked);
-    }
+    println!("{} files unpacked", total_entries_unpacked);
 
     Ok(())
 }

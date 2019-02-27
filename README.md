@@ -12,7 +12,7 @@ This tool will unpack a scene layer package, allowing users to inspect the packa
 
 At the moment, the only allowable sub-command is `unpack`. In the future this tool may be extended to allow repacking a folder into a .slpk package.
 
-By default the program produces no output, except in the case of errors. The `--verbose` flag can be used to have the program log a message for each file extracted from the scene layer package.
+By default the program produces very little output, except in the case of errors. The `--verbose` flag can be used to have the program log a message for each file extracted from the scene layer package.
 
 # License
 
