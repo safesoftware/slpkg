@@ -156,30 +156,46 @@ pub fn unpack(slpk_file_path: PathBuf, verbose: bool) -> Result<(), Error> {
     for i in 0..num_threads {
         let slpk_file_path = slpk_file_path.clone();
         let unpack_folder = unpack_folder.clone();
-        threads.push(thread::spawn(move || -> Result<(), Error> {
+        threads.push(thread::spawn(move || -> Result<usize, Error> {
             let mut slpk_archive = open_slpk_archive(slpk_file_path.clone())?;
             let num_entries = slpk_archive.len();
 
+            let mut entries_unpacked = 0;
             if let Some((start_entry, end_entry)) =
                 calculate_entries_for_thread(i, num_threads, num_entries)
             {
                 for entry_idx in start_entry..end_entry {
                     let archive_entry = slpk_archive.by_index(entry_idx)?;
                     unpack_entry(archive_entry, unpack_folder.clone(), verbose)?;
+                    entries_unpacked += 1;
                 }
             }
 
-            Ok(())
+            Ok(entries_unpacked)
         }));
     }
 
+    let mut total_entries_unpacked = 0;
     for t in threads {
-        if let Ok(Err(e)) = t.join() {
-            eprintln!("{}", e);
-
-            // TODO: Should this return, or wait for other threads to finish?
-            return Err(e);
+        let thread_result = t.join();
+        match thread_result {
+            Ok(Ok(n)) => {
+                total_entries_unpacked += n;
+            }
+            Ok(Err(e)) => {
+                eprintln!("{}", e);
+                // TODO: Should this return, or wait for other threads to finish?
+                return Err(e);
+            }
+            Err(e) => {
+                eprintln!("{:?}", e);
+                panic!("Thread panicked!")
+            }
         }
+    }
+
+    if verbose {
+        println!("{} files unpacked", total_entries_unpacked);
     }
 
     Ok(())
