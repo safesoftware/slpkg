@@ -129,53 +129,44 @@ fn unpack_entry(
     Ok(())
 }
 
-fn calculate_entries_for_thread(
-    thread_id: usize,
-    num_threads: usize,
-    num_entries: usize,
-) -> Option<(usize, usize)> {
-    // In theory, we're going to divide the work between threads, so that each thread gets
-    // an equal number of entries. In practice however, the number of entries is not going
-    // to be divisible by the number of threads, so some threads have to do extra work.
-    let entries_per_thread = ((num_entries as f64) / (num_threads as f64)).ceil() as usize;
+fn divide_entries_between_threads(num_entries: usize, num_cores: usize) -> Vec<(usize, usize)> {
+    let max_entries_per_thread = ((num_entries as f64) / (num_cores as f64)).ceil() as usize;
+    let mut splits = Vec::with_capacity(num_cores);
 
-    // Note that if the number of entries is small and the number of threads is fairly large,
-    // the calculations below could result in entry indices which are greater than num_entries.
-    let start_entry = entries_per_thread * thread_id;
-    let end_entry = entries_per_thread * (thread_id + 1);
-
-    if start_entry < num_entries {
-        Some((start_entry, std::cmp::min(end_entry, num_entries)))
-    } else {
-        None
+    for i in 0..num_cores {
+        let start_index = i * max_entries_per_thread;
+        if start_index < num_entries {
+            let end_index = std::cmp::min(num_entries, start_index + max_entries_per_thread);
+            splits.push((start_index, end_index));
+        }
     }
+
+    splits
 }
 
 pub fn unpack(slpk_file_path: &PathBuf, verbose: bool) -> Result<(), Error> {
     println!("Unpacking archive: {}", slpk_file_path.to_string_lossy());
 
+    let slpk_archive = open_slpk_archive(slpk_file_path.clone())?;
     let unpack_folder = get_unpack_folder(slpk_file_path.clone())?;
 
-    // We'll create one thread per CPU core.
-    let num_threads = num_cpus::get();
+    let num_entries = slpk_archive.len();
+    let num_cores = num_cpus::get();
 
-    let mut threads = Vec::with_capacity(num_threads);
-    for i in 0..num_threads {
+    let splits = divide_entries_between_threads(num_entries, num_cores);
+    let mut threads = Vec::with_capacity(splits.len());
+
+    for (start_entry, end_entry) in splits {
         let slpk_file_path = slpk_file_path.clone();
         let unpack_folder = unpack_folder.clone();
         threads.push(thread::spawn(move || -> Result<usize, Error> {
             let mut slpk_archive = open_slpk_archive(slpk_file_path.clone())?;
-            let num_entries = slpk_archive.len();
 
             let mut entries_unpacked = 0;
-            if let Some((start_entry, end_entry)) =
-                calculate_entries_for_thread(i, num_threads, num_entries)
-            {
-                for entry_idx in start_entry..end_entry {
-                    let archive_entry = slpk_archive.by_index(entry_idx)?;
-                    unpack_entry(archive_entry, unpack_folder.clone(), verbose)?;
-                    entries_unpacked += 1;
-                }
+            for entry_idx in start_entry..end_entry {
+                let archive_entry = slpk_archive.by_index(entry_idx)?;
+                unpack_entry(archive_entry, unpack_folder.clone(), verbose)?;
+                entries_unpacked += 1;
             }
 
             Ok(entries_unpacked)
@@ -204,4 +195,61 @@ pub fn unpack(slpk_file_path: &PathBuf, verbose: bool) -> Result<(), Error> {
     println!("{} files unpacked", total_entries_unpacked);
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_work_division_single_core() {
+        let ranges = divide_entries_between_threads(100, 1);
+        assert_eq!(ranges, vec![(0, 100)]);
+    }
+
+    #[test]
+    fn test_work_division_more_cores_than_files() {
+        let ranges = divide_entries_between_threads(10, 16);
+        assert_eq!(
+            ranges,
+            vec![
+                (0, 1),
+                (1, 2),
+                (2, 3),
+                (3, 4),
+                (4, 5),
+                (5, 6),
+                (6, 7),
+                (7, 8),
+                (8, 9),
+                (9, 10)
+            ]
+        )
+    }
+
+    #[test]
+    fn test_work_division_typical_case() {
+        let ranges = divide_entries_between_threads(123460, 16);
+        assert_eq!(
+            ranges,
+            vec![
+                (0, 7717),
+                (7717, 15434),
+                (15434, 23151),
+                (23151, 30868),
+                (30868, 38585),
+                (38585, 46302),
+                (46302, 54019),
+                (54019, 61736),
+                (61736, 69453),
+                (69453, 77170),
+                (77170, 84887),
+                (84887, 92604),
+                (92604, 100321),
+                (100321, 108038),
+                (108038, 115755),
+                (115755, 123460),
+            ]
+        )
+    }
 }
