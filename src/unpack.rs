@@ -13,6 +13,13 @@ use zip::ZipArchive;
 enum UnpackError {
     #[fail(display = "Unable to create a folder for unpacking the package")]
     NoFolderForPackage,
+    #[fail(
+        display = "The output folder cannot be created because a file with the same name already exists"
+    )]
+    OutputFolderIsAFile,
+
+    #[fail(display = "Package entries with an absolute path will not be extracted")]
+    PackageEntryHasAbsolutePath,
 }
 
 fn open_slpk_archive(slpk_file_path: PathBuf) -> Result<ZipArchive<impl Read + Seek>, Error> {
@@ -51,8 +58,8 @@ fn get_unpack_folder(mut slpk_file_path: PathBuf) -> Result<PathBuf, Error> {
             println!("Deleting folder: {}", slpk_file_path.to_string_lossy());
             std::fs::remove_dir_all(slpk_file_path.clone())?;
         } else if slpk_file_path.is_file() {
-            println!("Deleting file: {}", slpk_file_path.to_string_lossy());
-            std::fs::remove_file(slpk_file_path.clone())?;
+            // Don't clobber an existing file with the unpack folder.
+            return Err(Error::from(UnpackError::OutputFolderIsAFile));
         }
     }
 
@@ -64,13 +71,17 @@ fn create_folder_for_entry(
     mut target_directory: PathBuf,
     zip_entry: &PathBuf,
 ) -> Result<PathBuf, Error> {
-    // TODO: if the zip_entry is an absolute path, this will end up creating an absolute path on
-    // the target machine. This shouldn't happen, as all files should be extracted into the
-    // target folder.
     if let Some(parent_path) = zip_entry.parent() {
-        target_directory.push(parent_path);
-        std::fs::create_dir_all(target_directory.clone())?;
+        if parent_path.is_absolute() {
+            return Err(Error::from(UnpackError::PackageEntryHasAbsolutePath));
+        } else {
+            target_directory.push(parent_path);
+            std::fs::create_dir_all(target_directory.clone())?;
+        }
     }
+
+    // Entries which don't have a parent will be extracted into the
+    // target directory.
     Ok(target_directory)
 }
 
