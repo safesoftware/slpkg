@@ -1,3 +1,5 @@
+mod split_indices;
+
 use failure::Error;
 use flate2::read::GzDecoder;
 use std::fs::File;
@@ -93,7 +95,10 @@ fn unpack_entry(
     let archive_entry_path = archive_entry.sanitized_name();
     let target_folder = create_folder_for_entry(unpack_folder, &archive_entry_path)?;
 
-    if let Some("gz") = archive_entry_path.extension().and_then(std::ffi::OsStr::to_str) {
+    if let Some("gz") = archive_entry_path
+        .extension()
+        .and_then(std::ffi::OsStr::to_str)
+    {
         if let Some(non_gzip_name) = archive_entry_path.file_stem() {
             let mut target_file_path = target_folder;
             target_file_path.push(non_gzip_name);
@@ -129,21 +134,6 @@ fn unpack_entry(
     Ok(())
 }
 
-fn divide_entries_between_threads(num_entries: usize, num_cores: usize) -> Vec<(usize, usize)> {
-    let max_entries_per_thread = ((num_entries as f64) / (num_cores as f64)).ceil() as usize;
-    let mut splits = Vec::with_capacity(num_cores);
-
-    for i in 0..num_cores {
-        let start_index = i * max_entries_per_thread;
-        if start_index < num_entries {
-            let end_index = std::cmp::min(num_entries, start_index + max_entries_per_thread);
-            splits.push((start_index, end_index));
-        }
-    }
-
-    splits
-}
-
 pub fn unpack(slpk_file_path: &PathBuf, verbose: bool) -> Result<(), Error> {
     println!("Unpacking archive: {}", slpk_file_path.to_string_lossy());
 
@@ -153,7 +143,7 @@ pub fn unpack(slpk_file_path: &PathBuf, verbose: bool) -> Result<(), Error> {
     let num_entries = slpk_archive.len();
     let num_cores = num_cpus::get();
 
-    let splits = divide_entries_between_threads(num_entries, num_cores);
+    let splits = split_indices::split_indices_into_ranges(num_entries, num_cores);
     let mut threads = Vec::with_capacity(splits.len());
 
     for (start_entry, end_entry) in splits {
@@ -195,61 +185,4 @@ pub fn unpack(slpk_file_path: &PathBuf, verbose: bool) -> Result<(), Error> {
     println!("{} files unpacked", total_entries_unpacked);
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_work_division_single_core() {
-        let ranges = divide_entries_between_threads(100, 1);
-        assert_eq!(ranges, vec![(0, 100)]);
-    }
-
-    #[test]
-    fn test_work_division_more_cores_than_files() {
-        let ranges = divide_entries_between_threads(10, 16);
-        assert_eq!(
-            ranges,
-            vec![
-                (0, 1),
-                (1, 2),
-                (2, 3),
-                (3, 4),
-                (4, 5),
-                (5, 6),
-                (6, 7),
-                (7, 8),
-                (8, 9),
-                (9, 10)
-            ]
-        )
-    }
-
-    #[test]
-    fn test_work_division_typical_case() {
-        let ranges = divide_entries_between_threads(123460, 16);
-        assert_eq!(
-            ranges,
-            vec![
-                (0, 7717),
-                (7717, 15434),
-                (15434, 23151),
-                (23151, 30868),
-                (30868, 38585),
-                (38585, 46302),
-                (46302, 54019),
-                (54019, 61736),
-                (61736, 69453),
-                (69453, 77170),
-                (77170, 84887),
-                (84887, 92604),
-                (92604, 100321),
-                (100321, 108038),
-                (108038, 115755),
-                (115755, 123460),
-            ]
-        )
-    }
 }
