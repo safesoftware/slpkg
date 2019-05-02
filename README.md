@@ -8,7 +8,7 @@ This tool will unpack a scene layer package, allowing users to inspect the packa
 
 # Usage
 
-`slpkg unpack [--verbose] <src_file>`
+`slpkg unpack [--verbose] <slpk_file>`
 
 At the moment, the only allowable sub-command is `unpack`. In the future this tool may be extended to allow repacking a folder into a .slpk package.
 
@@ -17,3 +17,12 @@ By default the program produces very little output, except in the case of errors
 # License
 
 This program is licenced under the terms of the BSD-2-Clause license.
+
+# Building From Source
+
+Building this utility from source is quite easy. The following instructions apply on all platforms (Windows/Linux/Mac).
+1. Install Rust. The simplest way to get rust is with [rustup](https://rustup.rs/).
+2. Clone a local copy of this repository.
+3. Open a command prompt in the directory of your local respository
+4. Run `cargo build --release` to build the program. You can run the program using `cargo run --release [--verbose] <slpk_file>`
+5. To install the program, so that you don't need to use `cargo` to run it, use the `cargo install --path .` command. Once this is done, the program should be runnable from a command prompt in any directory, using the `slpkg` command.
